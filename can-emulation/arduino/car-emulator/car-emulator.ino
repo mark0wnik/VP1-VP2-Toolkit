@@ -22,9 +22,9 @@
 #define CAN_SPEED (50E3) //LOW=50E3, HIGH=125E3 (there are two speeds, for my VP2 model 50kbps works)
 #define AUTH_CONFIG_BYTE_0 0x00
 #define AUTH_CONFIG_BYTE_1 0x01
-#define ACC_PIN A0
-//#define SERIAL_COMM
-#define GIULIETTA //CAN simulation for my own car model
+#define ACC_PIN PIN3
+#define SERIAL_COMM
+//#define GIULIETTA //CAN simulation for my own car model
 //------------------------------------------------------------------------------
 // Inits, globals
 typedef struct {
@@ -85,6 +85,7 @@ void setup()
     DateTime.available();
 
     pinMode(ACC_PIN, INPUT);
+    //digitalWrite(ACC_PIN, HIGH);
 
 #ifdef SERIAL_COMM
     Serial.begin(250000);
@@ -197,14 +198,11 @@ void loop()
     RXcallback();
 #endif
     DateTime.now();
-    int button_state = digitalRead(ACC_PIN);
-    if(button_state != button_state_prev && button_state)
-    {
+
+    acc_on = !(digitalRead(ACC_PIN) > 0);
+    
+    if(acc_last != acc_on && acc_on)
         once = true;
-        acc_on = !acc_on;
-    }
-        
-    button_state_prev = button_state;
 
     packet_t packet;
     
