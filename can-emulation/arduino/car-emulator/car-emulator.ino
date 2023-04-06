@@ -85,6 +85,7 @@ void setup()
     DateTime.available();
 
     pinMode(ACC_PIN, INPUT);
+    //digitalWrite(ACC_PIN, HIGH);
 
 #ifdef SERIAL_COMM
     Serial.begin(250000);
