@@ -1,5 +1,5 @@
 // Developer: 
-//        Adam Varga, 2020, All rights reserved.
+//        Marek Biedrzycki, 2023, All rights reserved.
 // Licence: 
 //        Licenced under the MIT licence. See LICENCE file in the project root.
 // Usage of this code: 
@@ -14,16 +14,16 @@
 //        - MCP2515.h: 16e6 clock migth need frequency reduced to 8e6 (depending on MCP2515 clock)
 //        - MCP2515.cpp: extend CNF_MAPPER with your desired CAN speeds
 //------------------------------------------------------------------------------
-#include <CAN.h>
 #include <EEPROM.h>
-#include <DateTime.h>
+#include "CAN.h"
+#include "DateTime.h"
 //------------------------------------------------------------------------------
 // Settings
-#define CAN_SPEED (50E3) //LOW=50E3, HIGH=125E3 (there are two speeds, for my VP2 model 50kbps works)
+#define CAN_SPEED (50E3) //LOW=50E3, HIGH=125E3 (there are two speeds, for my VP2 model 50kbps works) //125E3 for blind spot sensor
 #define AUTH_CONFIG_BYTE_0 0x00
 #define AUTH_CONFIG_BYTE_1 0x01
-#define ACC_PIN A0
-//#define SERIAL_COMM
+#define ACC_PIN 3
+#define SERIAL_COMM
 #define GIULIETTA //CAN simulation for my own car model
 //------------------------------------------------------------------------------
 // Inits, globals
@@ -35,7 +35,7 @@ typedef struct {
   byte dataArray[20];
 } packet_t;
 
-#ifdef SERIAL_COMM
+#ifdef SERIAL_COMM 
 const char SEPARATOR = ',';
 const char TERMINATOR = '\n';
 const char RXBUF_LEN = 100;
@@ -92,7 +92,7 @@ void setup()
         ; // wait for serial port to connect. Needed for native USB port only
     }
 #endif
-
+    CAN.setClockFrequency(8E6);
     if (!CAN.begin(CAN_SPEED)) {
 #ifdef SERIAL_COMM
         Serial.println("Starting CAN failed!");
@@ -173,13 +173,28 @@ void onCANReceive(int packetSize) {
     }
 #ifdef GIULIETTA
     else if(rxPacket.id == 0xE094024)
+    {
         radio_on = true;
+#ifdef SERIAL_COMM
+        Serial.println("RADIO_ON");
+#endif
+    }
     else if(rxPacket.id == 0x6314024)
     {
         if(radio_status_prev > 0x10 && rxPacket.dataArray[2] == 0x10)
+        {
             radio_on = false;
+#ifdef SERIAL_COMM
+            Serial.println("RADIO_OFF");
+#endif
+        }    
         else if(radio_status_prev < 0x20 && rxPacket.dataArray[2] >= 0x20)
+        {
             radio_on = true;
+#ifdef SERIAL_COMM
+            Serial.println("RADIO_ON");
+#endif
+        }
         radio_status_prev = rxPacket.dataArray[2];
     }
     //C214024,00,01,000001012015
@@ -197,14 +212,18 @@ void loop()
     RXcallback();
 #endif
     DateTime.now();
-    int button_state = digitalRead(ACC_PIN);
-    if(button_state != button_state_prev && button_state)
+    acc_on = !digitalRead(ACC_PIN);
+    if(acc_on && !acc_last)
     {
         once = true;
-        acc_on = !acc_on;
+#ifdef SERIAL_COMM
+        Serial.println("ACC_ON");
+#endif
     }
-        
-    button_state_prev = button_state;
+#ifdef SERIAL_COMM
+    if(!acc_on && acc_last)
+        Serial.println("ACC_OFF");
+#endif
 
     packet_t packet;
     
