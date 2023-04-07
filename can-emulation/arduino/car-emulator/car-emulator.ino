@@ -20,10 +20,11 @@
 //------------------------------------------------------------------------------
 // Settings
 #define CAN_SPEED (50E3) //LOW=50E3, HIGH=125E3 (there are two speeds, for my VP2 model 50kbps works) //125E3 for blind spot sensor
+#define MCP_CLOCK 8E6
 #define AUTH_CONFIG_BYTE_0 0x00
 #define AUTH_CONFIG_BYTE_1 0x01
 #define ACC_PIN 3
-#define SERIAL_COMM
+//#define SERIAL_COMM
 #define GIULIETTA //CAN simulation for my own car model
 //------------------------------------------------------------------------------
 // Inits, globals
@@ -44,12 +45,18 @@ const char RXBUF_LEN = 100;
 byte auth_bytes[2];
 bool acc_on = false;
 bool acc_last = false;
+bool turn_off = false;
+bool can_transmit = false;
+bool on_from_button = false;
 bool radio_on = false;
 byte radio_status_prev = 0x00;
 bool once = false;
 byte tickler_count = 0x00;
 int button_state_prev;
 time_t time;
+unsigned long delay500;
+unsigned long delayRadioCheckState;
+unsigned long delayTurnOff;
 unsigned long every50;
 unsigned long every100;
 unsigned long every200;
@@ -93,7 +100,7 @@ void setup()
         ; // wait for serial port to connect. Needed for native USB port only
     }
 #endif
-    CAN.setClockFrequency(8E6);
+    CAN.setClockFrequency(MCP_CLOCK);
     if (!CAN.begin(CAN_SPEED)) {
 #ifdef SERIAL_COMM
         Serial.println("Starting CAN failed!");
@@ -127,6 +134,76 @@ void onCANReceive(int packetSize) {
     printPacket(&rxPacket);
 #endif
 
+#ifdef GIULIETTA
+    if(rxPacket.id == 0xE094024)
+    {
+        radio_on = true;
+        delayRadioCheckState = millis();
+        if(rxPacket.dataArray[1] == 0x1E) // powering on (auth required)...
+        {
+#ifdef SERIAL_COMM
+            if(rxPacket.dataArray[1] != radio_status_prev)
+                Serial.println("radio turning on (auth required)");
+#endif 
+            can_transmit = true;
+        }
+        if(rxPacket.dataArray[1] == 0x1A) // powering on (auth ok)...
+        {
+#ifdef SERIAL_COMM
+            if(rxPacket.dataArray[1] != radio_status_prev)
+                Serial.println("radio turning on (auth ok)");
+#endif 
+        }
+        if(rxPacket.dataArray[1] == 0x3A) // normal powered-on
+        {
+#ifdef SERIAL_COMM
+            if(rxPacket.dataArray[1] != radio_status_prev)
+                Serial.println("radio on");
+#endif 
+        }
+        else if(rxPacket.dataArray[1] == 0x1C) // power-on from button on acc_off (from deep-sleep)
+        {
+#ifdef SERIAL_COMM
+            if(rxPacket.dataArray[1] != radio_status_prev)
+                Serial.println("radio button on (from deep-sleep)");
+#endif 
+            can_transmit = true;
+            on_from_button = true;
+            delayTurnOff = delayRadioCheckState;
+            once = true;
+        }
+        else if(rxPacket.dataArray[1] == 0x3C) // power-on from button on acc_off (already active)
+        {
+#ifdef SERIAL_COMM
+            if(rxPacket.dataArray[1] != radio_status_prev)
+                Serial.println("radio button on (already active)");
+#endif 
+            can_transmit = true;
+            on_from_button = true;
+            delayTurnOff = delayRadioCheckState;
+            once = true;
+        }
+        else if(rxPacket.dataArray[1] == 0x3E)
+        {
+#ifdef SERIAL_COMM
+            Serial.println("radio error (auth error)"); // power-on error
+#endif
+        }
+        radio_status_prev = rxPacket.dataArray[1];
+    }
+    // else if(rxPacket.id == 0x6314024)
+    // {
+    //     if(radio_status_prev > 0x10 && rxPacket.dataArray[2] == 0x10)
+    //         radio_on = false;
+    //     else if(radio_status_prev < 0x20 && rxPacket.dataArray[2] >= 0x20)
+    //         radio_on = true;
+    //     radio_status_prev = rxPacket.dataArray[2];
+    // }
+    //C214024,00,01,000001012015
+    else if(rxPacket.id == 0xC214024)
+        setTime(rxPacket.dataArray);
+#endif
+
     //immo logic
     if(rxPacket.id == 0xA094005)
     {
@@ -145,9 +222,6 @@ void onCANReceive(int packetSize) {
             delete[] code;
 
             sendPacketToCan(&auth_res);
-#ifdef SERIAL_COMM
-            printPacket(&auth_res);
-#endif
         }
         else if(rxPacket.dataArray[0] == 0x01)
         {
@@ -167,43 +241,11 @@ void onCANReceive(int packetSize) {
             auth_res.dataArray[1] = rxPacket.dataArray[1];
             auth_res.dataArray[2] = rxPacket.dataArray[2];
             sendPacketToCan(&auth_res);
-#ifdef SERIAL_COMM
-            printPacket(&auth_res);
-#endif
         }
     }
-#ifdef GIULIETTA
-    else if(rxPacket.id == 0xE094024)
-    {
-        radio_on = true;
-#ifdef SERIAL_COMM
-        Serial.println("RADIO_ON");
-#endif
-    }
-    else if(rxPacket.id == 0x6314024)
-    {
-        if(radio_status_prev > 0x10 && rxPacket.dataArray[2] == 0x10)
-        {
-            radio_on = false;
-#ifdef SERIAL_COMM
-            Serial.println("RADIO_OFF");
-#endif
-        }    
-        else if(radio_status_prev < 0x20 && rxPacket.dataArray[2] >= 0x20)
-        {
-            radio_on = true;
-#ifdef SERIAL_COMM
-            Serial.println("RADIO_ON");
-#endif
-        }
-        radio_status_prev = rxPacket.dataArray[2];
-    }
-    //C214024,00,01,000001012015
-    else if(rxPacket.id == 0xC214024)
-        setTime(rxPacket.dataArray);
-#endif
 }
 
+unsigned long current;
 
 //------------------------------------------------------------------------------
 // Main
@@ -217,20 +259,28 @@ void loop()
     if(acc_on && !acc_last)
     {
         once = true;
+        can_transmit = true;
+        on_from_button = false;
 #ifdef SERIAL_COMM
-        Serial.println("ACC_ON");
+        Serial.println("acc on");
 #endif
     }
-#ifdef SERIAL_COMM
     if(!acc_on && acc_last)
-        Serial.println("ACC_OFF");
+    {
+        turn_off = true;
+        delay500 = millis();
+#ifdef SERIAL_COMM
+        Serial.println("acc off");
 #endif
+    }
+        
+
 
     packet_t packet;
     
     //if(!acc_on && !radio_on) { return; }
 #ifdef GIULIETTA    
-    if(once && !radio_on && acc_on) { //starting sequence
+    if(once && acc_on) { //starting sequence
         // E094018,00,01,02,00,04
         packet = {0xE094018, 0x00, 0x01, 0x02, {0x00,0x04}};
         sendPacketToCan(&packet);
@@ -285,30 +335,30 @@ void loop()
         once = false;
     }
 
-    if(once && radio_on && !acc_on) {
-        // E094000,00,01,06,00,18,00,00,00,01
-        packet = {0xE094000, 0x00, 0x01, 0x06, {0x00,0x18,0x00,0x00,0x00,0x01}};
-        sendPacketToCan(&packet);
-        // E094000,00,01,06,00,1E,01,00,00,01
-        packet = {0xE094000, 0x00, 0x01, 0x06, {0x00,0x1E,0x01,0x00,0x00,0x01}};
-        sendPacketToCan(&packet);
-        // E094003,00,01,02,00,0A
-        packet = {0xE094003, 0x00, 0x01, 0x02, {0x00,0x0A}};
-        sendPacketToCan(&packet);
-        // C394003,00,01,08,00,10,00,10,80,00,40,00
-        packet = {0xC394003, 0x00, 0x01, 0x08, {0x00,0x10,0x00,0x10,0x80,0x00,0x40,0x00}};
-        sendPacketToCan(&packet);
-        // 2214000,00,01,06,28,00,00,00,00,00
-        packet = {0x2214000, 0x00, 0x01, 0x06, {0x00,0x00,0x00,0x00,0x00,0x00}};
-        sendPacketToCan(&packet);
-        // 6214000,00,01,08,00,08,48,00,00,00,0F,00
-        packet = {0x6214000, 0x00, 0x01, 0x08, {0x00,0x08,0x48,0x00,0x00,0x00,0x0F,0x00}};
-        sendPacketToCan(&packet);
-        every50 = every100 = every200 = every300 = every500 = every1000 = millis();
-        once = false;
-    }
+    // if(once && radio_on && !acc_on) {
+    //     // E094000,00,01,06,00,18,00,00,00,01
+    //     packet = {0xE094000, 0x00, 0x01, 0x06, {0x00,0x18,0x00,0x00,0x00,0x01}};
+    //     sendPacketToCan(&packet);
+    //     // E094000,00,01,06,00,1E,01,00,00,01
+    //     packet = {0xE094000, 0x00, 0x01, 0x06, {0x00,0x1E,0x01,0x00,0x00,0x01}};
+    //     sendPacketToCan(&packet);
+    //     // E094003,00,01,02,00,0A
+    //     packet = {0xE094003, 0x00, 0x01, 0x02, {0x00,0x0A}};
+    //     sendPacketToCan(&packet);
+    //     // C394003,00,01,08,00,10,00,10,80,00,40,00
+    //     packet = {0xC394003, 0x00, 0x01, 0x08, {0x00,0x10,0x00,0x10,0x80,0x00,0x40,0x00}};
+    //     sendPacketToCan(&packet);
+    //     // 2214000,00,01,06,28,00,00,00,00,00
+    //     packet = {0x2214000, 0x00, 0x01, 0x06, {0x00,0x00,0x00,0x00,0x00,0x00}};
+    //     sendPacketToCan(&packet);
+    //     // 6214000,00,01,08,00,08,48,00,00,00,0F,00
+    //     packet = {0x6214000, 0x00, 0x01, 0x08, {0x00,0x08,0x48,0x00,0x00,0x00,0x0F,0x00}};
+    //     sendPacketToCan(&packet);
+    //     every50 = every100 = every200 = every300 = every500 = every1000 = millis();
+    //     once = false;
+    // }
 
-    unsigned long current = millis();
+    current = millis();
 
     if(current - every50 > 50)
     {
@@ -331,7 +381,7 @@ void loop()
         every100 = current;
     }
 
-    if(current - every200 > 200 && radio_on)
+    if(current - every200 > 200)
     {
         // 6214000,00,01,08,08,08,48,00,02,5C,0B,00        < when on
         // 6214000,00,01,08,00,08,18,00,00,00,0F,00        < when off
@@ -351,7 +401,7 @@ void loop()
         every200 = current;
     }
 
-    if(current - every300 > 300 && radio_on)
+    if(current - every300 > 300)
     {
         // 6254006,00,01,08,10,00,00,00,00,00,00,00        < tickler
         packet = {0x6254006, 0x00, 0x01, 0x08, {tickler_count,0x00,0x00,0x00,0x00,0x00,0x00,0x00}};
@@ -368,7 +418,7 @@ void loop()
         every300 = current;
     }
 
-    if(current - every500 > 500 && radio_on)
+    if(current - every500 > 500)
     {
         // 621400A,00,01,02,00,00                          < only when on
         packet = {0x621400A, 0x00, 0x01, 0x02, {0x00,0x00}};
@@ -387,7 +437,7 @@ void loop()
         every500 = current;
     }
 
-    if(current - every1000 > 1000 && radio_on)
+    if(current - every1000 > 1000)
     {
         // E094018,00,01,02,00,06                          < only when on
         packet = {0xE094018, 0x00, 0x01, 0x02, {0x00,0x06}};
@@ -413,6 +463,34 @@ void loop()
         every1000 = current;
     }
 #endif
+
+    if(radio_on && (millis() - delayRadioCheckState > 1200))
+    {
+        radio_on = false;
+        radio_status_prev = 0x00;
+#ifdef SERIAL_COMM
+        Serial.println("radio off");
+#endif
+    }
+
+    if(on_from_button && (millis() - delayTurnOff > 5000))
+    {
+        delay500 = millis();
+        turn_off = true;
+        on_from_button = false;
+#ifdef SERIAL_COMM
+        Serial.println("turning canbus off");
+#endif
+    }
+        
+    if(turn_off && (millis() - delay500 > 1000))
+    {
+        turn_off = false;
+        can_transmit = false;
+#ifdef SERIAL_COMM
+        Serial.println("canbus off");
+#endif
+    }  
     acc_last = acc_on;
 }
 
@@ -539,6 +617,8 @@ void hexCharacterStringToBytes(byte* byteArray, char* hexString)
 }
 
 void sendPacketToCan(packet_t * packet) {
+    if(!can_transmit)
+        return;
   for (int retries = 10; retries > 0; retries--) {
     bool rtr = packet->rtr ? true : false;
     if (packet->ide){
