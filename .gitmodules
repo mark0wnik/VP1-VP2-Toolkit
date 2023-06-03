@@ -1,2 +1,2 @@
-[submodule "can-emulation/arduino/car-emulator/libraries/CAN"]
+[submodule "can-emulation/arduino/car-emulator/src/CAN"]
 	url = https://github.com/sandeepmistry/arduino-CAN.git
