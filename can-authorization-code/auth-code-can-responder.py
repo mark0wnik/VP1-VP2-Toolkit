@@ -7,9 +7,9 @@ with serial.Serial('/dev/ttyUSB1', 250000) as ser:
     while (True):
         if (ser.inWaiting() > 0):
             line = ser.readline().decode("ascii").strip()
+            print(line)
             if ',' in line:
                 arr = line.split(',')
-                print(line)
                 if(arr[0] == 'A094005'):
                     data = bytes.fromhex(arr[3])
                     stage = data[0]

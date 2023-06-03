@@ -15,8 +15,8 @@
 //        - MCP2515.cpp: extend CNF_MAPPER with your desired CAN speeds
 //------------------------------------------------------------------------------
 #include <EEPROM.h>
-#include "CAN.h"
-#include "DateTime.h"
+#include "src/CAN/src/CAN.h"
+#include "src/DateTime/src/DateTime.h"
 //------------------------------------------------------------------------------
 // Settings
 #define CAN_SPEED (50E3) //LOW=50E3, HIGH=125E3 (there are two speeds, for my VP2 model 50kbps works) //125E3 for blind spot sensor
@@ -24,7 +24,8 @@
 #define AUTH_CONFIG_BYTE_0 0x00
 #define AUTH_CONFIG_BYTE_1 0x01
 #define ACC_PIN 3
-//#define SERIAL_COMM
+#define SERIAL_COMM
+#define SERIAL_DEBUG
 #define GIULIETTA //CAN simulation for my own car model
 //------------------------------------------------------------------------------
 // Inits, globals
@@ -91,7 +92,7 @@ void setup()
     DateTime.sync(time);
     DateTime.available();
 
-    pinMode(ACC_PIN, INPUT);
+    //pinMode(ACC_PIN, INPUT);
     //digitalWrite(ACC_PIN, HIGH);
 
 #ifdef SERIAL_COMM
