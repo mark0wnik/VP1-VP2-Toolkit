@@ -20,7 +20,7 @@
 //------------------------------------------------------------------------------
 // Settings
 #define CAN_SPEED (50E3) //LOW=50E3, HIGH=125E3 (there are two speeds, for my VP2 model 50kbps works) //125E3 for blind spot sensor
-#define MCP_CLOCK 8E6
+#define MCP_CLOCK 16E6
 #define AUTH_CONFIG_BYTE_0 0x00
 #define AUTH_CONFIG_BYTE_1 0x01
 #define ACC_PIN 3
@@ -102,14 +102,14 @@ void setup()
 #endif
     CAN.setClockFrequency(MCP_CLOCK);
     if (!CAN.begin(CAN_SPEED)) {
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
         Serial.println("Starting CAN failed!");
 #endif
         while (1);
     }
     // register the receive callback
     CAN.onReceive(onCANReceive);
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
     Serial.println("CAN RX TX Started");
 #endif
 }
@@ -141,7 +141,7 @@ void onCANReceive(int packetSize) {
         delayRadioCheckState = millis();
         if(rxPacket.dataArray[1] == 0x1E) // powering on (auth required)...
         {
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
             if(rxPacket.dataArray[1] != radio_status_prev)
                 Serial.println("radio turning on (auth required)");
 #endif 
@@ -149,21 +149,21 @@ void onCANReceive(int packetSize) {
         }
         if(rxPacket.dataArray[1] == 0x1A) // powering on (auth ok)...
         {
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
             if(rxPacket.dataArray[1] != radio_status_prev)
                 Serial.println("radio turning on (auth ok)");
 #endif 
         }
         if(rxPacket.dataArray[1] == 0x3A) // normal powered-on
         {
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
             if(rxPacket.dataArray[1] != radio_status_prev)
                 Serial.println("radio on");
 #endif 
         }
         else if(rxPacket.dataArray[1] == 0x1C) // power-on from button on acc_off (from deep-sleep)
         {
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
             if(rxPacket.dataArray[1] != radio_status_prev)
                 Serial.println("radio button on (from deep-sleep)");
 #endif 
@@ -174,7 +174,7 @@ void onCANReceive(int packetSize) {
         }
         else if(rxPacket.dataArray[1] == 0x3C) // power-on from button on acc_off (already active)
         {
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
             if(rxPacket.dataArray[1] != radio_status_prev)
                 Serial.println("radio button on (already active)");
 #endif 
@@ -185,7 +185,7 @@ void onCANReceive(int packetSize) {
         }
         else if(rxPacket.dataArray[1] == 0x3E)
         {
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
             Serial.println("radio error (auth error)"); // power-on error
 #endif
         }
@@ -205,44 +205,44 @@ void onCANReceive(int packetSize) {
 #endif
 
     //immo logic
-    if(rxPacket.id == 0xA094005)
-    {
-        packet_t auth_res = {0xA114000, 0x00, 0x01, 0x03, {0x00, 0x00, 0x00}};
+    // if(rxPacket.id == 0xA094005)
+    // {
+    //     packet_t auth_res = {0xA114000, 0x00, 0x01, 0x03, {0x00, 0x00, 0x00}};
 
-        if(rxPacket.dataArray[0] == 0x00)
-        {
-            //calc code
-            byte buff[2] = { rxPacket.dataArray[1], rxPacket.dataArray[2] };
-            byte* code = getCode(false, buff);
+    //     if(rxPacket.dataArray[0] == 0x00)
+    //     {
+    //         //calc code
+    //         byte buff[2] = { rxPacket.dataArray[1], rxPacket.dataArray[2] };
+    //         byte* code = getCode(false, buff);
 
-            //return response
-            auth_res.dataArray[0] = rxPacket.dataArray[0];
-            auth_res.dataArray[1] = code[0];
-            auth_res.dataArray[2] = code[1];
-            delete[] code;
+    //         //return response
+    //         auth_res.dataArray[0] = rxPacket.dataArray[0];
+    //         auth_res.dataArray[1] = code[0];
+    //         auth_res.dataArray[2] = code[1];
+    //         delete[] code;
 
-            sendPacketToCan(&auth_res);
-        }
-        else if(rxPacket.dataArray[0] == 0x01)
-        {
-            //calculate init
-            byte buff[2] = { rxPacket.dataArray[1], rxPacket.dataArray[2] };
-            byte* result = getCode(true, buff);
+    //         sendPacketToCan(&auth_res);
+    //     }
+    //     else if(rxPacket.dataArray[0] == 0x01)
+    //     {
+    //         //calculate init
+    //         byte buff[2] = { rxPacket.dataArray[1], rxPacket.dataArray[2] };
+    //         byte* result = getCode(true, buff);
 
-            //set and save init
-            auth_bytes[0] = result[0];
-            auth_bytes[1] = result[1];
-            EEPROM.write(AUTH_CONFIG_BYTE_0, auth_bytes[0]);
-            EEPROM.write(AUTH_CONFIG_BYTE_1, auth_bytes[1]);
-            delete[] result;
+    //         //set and save init
+    //         auth_bytes[0] = result[0];
+    //         auth_bytes[1] = result[1];
+    //         EEPROM.write(AUTH_CONFIG_BYTE_0, auth_bytes[0]);
+    //         EEPROM.write(AUTH_CONFIG_BYTE_1, auth_bytes[1]);
+    //         delete[] result;
 
-            //return ack
-            auth_res.dataArray[0] = rxPacket.dataArray[0];
-            auth_res.dataArray[1] = rxPacket.dataArray[1];
-            auth_res.dataArray[2] = rxPacket.dataArray[2];
-            sendPacketToCan(&auth_res);
-        }
-    }
+    //         //return ack
+    //         auth_res.dataArray[0] = rxPacket.dataArray[0];
+    //         auth_res.dataArray[1] = rxPacket.dataArray[1];
+    //         auth_res.dataArray[2] = rxPacket.dataArray[2];
+    //         sendPacketToCan(&auth_res);
+    //     }
+    // }
 }
 
 unsigned long current;
@@ -255,13 +255,13 @@ void loop()
     RXcallback();
 #endif
     DateTime.now();
-    acc_on = !digitalRead(ACC_PIN);
+    //acc_on = !digitalRead(ACC_PIN);
     if(acc_on && !acc_last)
     {
         once = true;
         can_transmit = true;
         on_from_button = false;
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
         Serial.println("acc on");
 #endif
     }
@@ -269,7 +269,7 @@ void loop()
     {
         turn_off = true;
         delay500 = millis();
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
         Serial.println("acc off");
 #endif
     }
@@ -468,7 +468,7 @@ void loop()
     {
         radio_on = false;
         radio_status_prev = 0x00;
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
         Serial.println("radio off");
 #endif
     }
@@ -478,7 +478,7 @@ void loop()
         delay500 = millis();
         turn_off = true;
         on_from_button = false;
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
         Serial.println("turning canbus off");
 #endif
     }
@@ -487,7 +487,7 @@ void loop()
     {
         turn_off = false;
         can_transmit = false;
-#ifdef SERIAL_COMM
+#ifdef SERIAL_DEBUG
         Serial.println("canbus off");
 #endif
     }  
@@ -725,8 +725,8 @@ void RXcallback(void) {
         char c = Serial.read();
         rxBuf[rxPtr++] = c;
 
-        // if  (c == '.')
-        //     acc_on = !acc_on;
+        //if  (c == '.')
+        //  acc_on = !acc_on;
 
         if (c == TERMINATOR) {
             rxParse(rxBuf, rxPtr);
